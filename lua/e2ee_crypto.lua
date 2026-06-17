@@ -5,6 +5,8 @@
 --
 
 local ffi = require("ffi")
+local bit = require("bit")
+local str = require("resty.string")
 local ngx = ngx
 local base64 = require("ngx.base64") or {
     encode_base64 = ngx.encode_base64,
@@ -44,6 +46,19 @@ ffi.cdef[[
                                 uint8_t *out, size_t out_max);
 
     void e2ee_random_bytes(uint8_t *out, size_t len);
+
+    /* DCAP TD-quote verification (Intel QVL). Verifies the quote signature and
+     * TCB status, then copies parsed TD report fields out. Returns 0 only when
+     * the quote is cryptographically valid and not revoked. */
+    typedef struct {
+        uint8_t report_data[64];
+        uint8_t mrtd[48];
+        uint8_t td_attributes[8];
+        uint32_t tcb_status;   /* 0 = UpToDate */
+    } e2ee_td_report_t;
+
+    int e2ee_verify_td_quote(const uint8_t *quote, size_t quote_len,
+                             e2ee_td_report_t *out);
 ]]
 
 local lib = ffi.load("/usr/local/openresty/lib/libe2ee_proxy.so")
@@ -176,6 +191,27 @@ local function derive_key(shared_secret, mlkem_ct, info)
         return nil, "HKDF derivation failed"
     end
     return ffi.string(okm, 32)
+end
+
+--- Verify a base64 TDX quote via the native Intel DCAP verifier.
+-- Returns { report_data, mrtd (hex), debug (bool) } or nil + error.
+function _M.verify_td_quote(quote_b64)
+    local quote = ngx.decode_base64(quote_b64)
+    if not quote then return nil, "quote is not valid base64" end
+
+    local report = ffi.new("e2ee_td_report_t")
+    local rc = lib.e2ee_verify_td_quote(ffi.cast("const uint8_t*", quote), #quote, report)
+    if rc ~= 0 then return nil, "DCAP verification failed (rc=" .. rc .. ")" end
+    if report.tcb_status ~= 0 then
+        ngx.log(ngx.WARN, "TD quote tcb_status=", tonumber(report.tcb_status),
+                " (SW hardening recommended)")
+    end
+
+    return {
+        report_data = str.to_hex(ffi.string(report.report_data, 64)),
+        mrtd        = str.to_hex(ffi.string(report.mrtd, 48)),
+        debug       = bit.band(report.td_attributes[0], 0x01) ~= 0,
+    }
 end
 
 --- Build an encrypted E2EE request blob

@@ -11,6 +11,7 @@
 
 local http = require("resty.http")
 local cjson = require("cjson.safe")
+local attest = require("e2ee_attest")
 
 local _M = {}
 
@@ -156,6 +157,17 @@ local function fetch_instances(chute_id, api_key)
     if not data or not data.instances then
         return nil, "invalid instance discovery response: " .. (res.body or ""):sub(1, 200)
     end
+
+    -- Verify-then-encrypt: drop any instance whose e2e_pubkey is not bound to a
+    -- valid, non-debug, golden TD quote. Encryption only ever sees attested keys.
+    local verified, verr = attest.filter_verified(chute_id, data.instances, api_key)
+    if not verified then
+        return nil, verr
+    end
+    if #verified == 0 then
+        return nil, "no attestation-verified E2EE instances for chute " .. chute_id
+    end
+    data.instances = verified
 
     local nonce_ttl = data.nonce_expires_in or 55
     local expires_at = ngx.now() + nonce_ttl

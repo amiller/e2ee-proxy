@@ -12,3 +12,4 @@ e2ee_chacha20_open
 e2ee_gzip_compress
 e2ee_gzip_decompress
 e2ee_random_bytes
+e2ee_verify_td_quote

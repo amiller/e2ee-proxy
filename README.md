@@ -143,6 +143,8 @@ docker run -p 8443:443 \
 | `TLS_SELF_SIGNED` | Set to `true` to generate a self-signed cert | `false` |
 | `TLS_DOMAIN` | Domain for server_name and self-signed cert SAN | `localhost` (self-signed) / `_` (catch-all) |
 | `ALLOW_NON_CONFIDENTIAL` | Set to `true` to allow non-TEE models | `false` |
+| `CHUTES_GOLDEN_MRTD` | Comma-separated allowlist of accepted MRTD hex values | *(required for attestation)* |
+| `CHUTES_DISABLE_ATTESTATION` | Set to `true` to skip quote verification (unsafe) | `false` |
 
 ### Mode Priority
 
@@ -158,6 +160,11 @@ By default, the proxy **rejects requests to models not running in a Trusted Exec
 
 Models with `confidential_compute: true` in `/v1/models` (typically suffixed with `-TEE`) are allowed. Non-confidential models return an error:
 
+> **Note:** `confidential_compute` is a flag returned by the API. The proxy does
+> not take it on trust — it additionally **attests each instance before
+> encrypting** (see *Attestation* below), so a substituted key is rejected even
+> if the flag says `true`.
+
 ```
 model 'Qwen/Qwen3-32B' is not running in confidential compute (TEE).
 E2EE requires confidential compute to guarantee privacy.
@@ -169,6 +176,33 @@ To bypass this check (e.g. for testing):
 ```bash
 docker run -p 8443:443 -e ALLOW_NON_CONFIDENTIAL=true parachutes/e2ee-proxy:latest
 ```
+
+## Attestation (verify-then-encrypt)
+
+Instance discovery (`/e2e/instances`) returns each instance's ML-KEM public key.
+Encrypting to a key on the API's say-so alone is a key-substitution MITM: the
+control plane could return a key it holds and read every prompt. To close this,
+the proxy fetches each instance's TD quote bound to a fresh client nonce
+(`/chutes/{chute_id}/evidence?nonce=`) and verifies, **before the key is used**:
+
+1. the DCAP quote signature and TCB status (Intel QVL),
+2. `report_data[:32] == SHA256(nonce ‖ e2e_pubkey)` — the key is bound to this attested enclave,
+3. the TD is not in debug mode,
+4. `MRTD` is in the pinned `CHUTES_GOLDEN_MRTD` allowlist.
+
+Instances that fail are dropped; if none verify, the request fails closed. This
+mirrors `verify_chute.py` in the chutes-api docs.
+
+```bash
+docker run -p 8443:443 \
+  -e CHUTES_GOLDEN_MRTD=<mrtd_hex>[,<mrtd_hex>...] \
+  parachutes/e2ee-proxy:latest
+```
+
+`CHUTES_GOLDEN_MRTD` must come from a source you trust (a signed release / the
+published reproducible-build value), not from the API — otherwise verification
+is trust-on-first-use. Collateral fetch needs the DCAP QPL configured
+(`sgx_default_qcnl.conf`, pointing at a PCCS or Intel PCS).
 
 ## API Endpoints
 

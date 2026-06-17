@@ -64,6 +64,25 @@ size_t e2ee_gzip_decompress(const uint8_t *in, size_t in_len,
 /* Random Bytes (CSPRNG) */
 void e2ee_random_bytes(uint8_t *out, size_t len);
 
+/* DCAP TD-quote verification (Intel QVL).
+ *
+ * Verifies an Intel TDX quote's ECDSA signature and TCB status, then copies the
+ * parsed TD report fields out so the caller can enforce policy (report_data
+ * binding, debug bit, golden MRTD). Returns 0 only when the quote is
+ * cryptographically valid; tcb_status carries the QVL verdict (0 = UpToDate).
+ *
+ * Links libsgx_dcap_quoteverify; the DCAP QPL must be configured to fetch
+ * collateral (PCCS or Intel PCS). */
+typedef struct {
+    uint8_t  report_data[64];
+    uint8_t  mrtd[48];
+    uint8_t  td_attributes[8];
+    uint32_t tcb_status;   /* 0 = UpToDate */
+} e2ee_td_report_t;
+
+int e2ee_verify_td_quote(const uint8_t *quote, size_t quote_len,
+                         e2ee_td_report_t *out);
+
 #ifdef __cplusplus
 }
 #endif

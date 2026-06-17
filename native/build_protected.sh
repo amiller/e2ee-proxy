@@ -90,7 +90,7 @@ $CLANG -shared \
   "$IR_DIR/e2ee_proxy_api.o" \
   "$IR_DIR/secure_crypto.o" \
   "$IR_DIR"/mlkem_*.o \
-  -lz -lpthread
+  -lz -lpthread -lsgx_dcap_quoteverify
 
 echo "=== Step 8: Strip symbols ==="
 strip --strip-unneeded "$OUT_DIR/libe2ee_proxy.so"

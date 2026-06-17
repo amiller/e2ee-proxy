@@ -48,6 +48,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl-dev zlib1g-dev openssl xxd binutils \
     && rm -rf /var/lib/apt/lists/*
 
+# Intel DCAP quote-verification headers + lib (for e2ee_verify_td_quote).
+RUN . /etc/os-release \
+    && mkdir -p /etc/apt/keyrings \
+    && wget -qO /etc/apt/keyrings/intel-sgx.asc https://download.01.org/intel-sgx/sgx_repo/ubuntu/intel-sgx-deb.key \
+    && echo "deb [signed-by=/etc/apt/keyrings/intel-sgx.asc] https://download.01.org/intel-sgx/sgx_repo/ubuntu $VERSION_CODENAME main" \
+       > /etc/apt/sources.list.d/intel-sgx.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
+       libsgx-dcap-quote-verify-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN wget -qO- https://apt.llvm.org/llvm.sh | bash -s -- 17 all
 
 ENV PATH="/usr/lib/llvm-17/bin:$PATH"
@@ -84,8 +94,21 @@ RUN rm -rf /tmp/certs /build/native/embedded_certs.h
 # ---------------------------------------------------------------------------
 FROM --platform=linux/amd64 openresty/openresty:1.25.3.2-0-jammy
 
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates wget gnupg \
+    && rm -rf /var/lib/apt/lists/*
 RUN opm get ledgetech/lua-resty-http
+
+# Intel DCAP quote-verify runtime + default Quote Provider Library (collateral
+# fetch). Configure the QPL/PCCS (or Intel PCS) at runtime via sgx_default_qcnl.conf.
+RUN . /etc/os-release \
+    && mkdir -p /etc/apt/keyrings \
+    && wget -qO /etc/apt/keyrings/intel-sgx.asc https://download.01.org/intel-sgx/sgx_repo/ubuntu/intel-sgx-deb.key \
+    && echo "deb [signed-by=/etc/apt/keyrings/intel-sgx.asc] https://download.01.org/intel-sgx/sgx_repo/ubuntu $VERSION_CODENAME main" \
+       > /etc/apt/sources.list.d/intel-sgx.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
+       libsgx-dcap-quote-verify libsgx-dcap-default-qpl \
+    && rm -rf /var/lib/apt/lists/*
 
 # Native .so
 COPY --from=native-builder /out/libe2ee_proxy.so /usr/local/openresty/lib/libe2ee_proxy.so
